@@ -1,0 +1,43 @@
+# examples/sv-agent · 追加在通用评测补丁后面（tools/install_profile.py --example sv-agent 会接上）
+#   {{SV_BRIDGE}}   sv-bridge 仓库的绝对路径（插件在 <sv-bridge>/dsh/plugins）
+#   {{LAB}}         本仓库的绝对路径
+#   {{PYTHON}}      跑假 Worker 的 Python
+# 五个 SV 插件照网页版挂，只换掉会碰真实数据 / 要跑十几分钟的地方：
+#   - 工作区根目录 = 命令行当前目录（评测框架 cd 进每一遍自己的 ws）
+#   - 版本库、记忆、剪映草稿 → 每一遍自己的 data（DSH_LAB_DATA）；没设就报错，不会写到别处
+#   - 翻唱、视频的 Worker → 本例子的假 Worker（契约一样，几十秒跑完；SV_EVAL_SECONDS / SV_EVAL_FAIL 控制）
+#   - 不配 llama（sv-cover 不会在评测中途卸掉本地模型）
+
+- insert:
+    - id: sv-project
+      name: {{SV_BRIDGE}}/dsh/plugins/sv-project/index.js
+      config:
+        root: !!js process.cwd()
+    - id: sv-artifact
+      name: {{SV_BRIDGE}}/dsh/plugins/sv-artifact/index.js
+      config:
+        root: !!js process.cwd()
+        store: !!js (process.env.DSH_LAB_DATA ?? (() => { throw new Error('评测：DSH_LAB_DATA 没设') })()) + '/snapshots'
+    - id: sv-cover
+      name: {{SV_BRIDGE}}/dsh/plugins/sv-cover/index.js
+      config:
+        root: !!js process.cwd()
+        store: !!js (process.env.DSH_LAB_DATA ?? (() => { throw new Error('评测：DSH_LAB_DATA 没设') })()) + '/snapshots'
+        python: {{PYTHON}}
+        worker: {{LAB}}/examples/sv-agent/fake_workers/cover_run_fake.py
+        sandbox: false
+        memory: !!js (process.env.DSH_LAB_DATA ?? (() => { throw new Error('评测：DSH_LAB_DATA 没设') })()) + '/memory'
+    - id: sv-memory
+      name: {{SV_BRIDGE}}/dsh/plugins/sv-memory/index.js
+      config:
+        root: !!js process.cwd()
+        store: !!js (process.env.DSH_LAB_DATA ?? (() => { throw new Error('评测：DSH_LAB_DATA 没设') })()) + '/memory'
+        artifacts: !!js (process.env.DSH_LAB_DATA ?? (() => { throw new Error('评测：DSH_LAB_DATA 没设') })()) + '/snapshots'
+    - id: sv-video
+      name: {{SV_BRIDGE}}/dsh/plugins/sv-video/index.js
+      config:
+        root: !!js process.cwd()
+        python: {{PYTHON}}
+        worker: {{LAB}}/examples/sv-agent/fake_workers/video_run_fake.py
+        drafts: !!js (process.env.DSH_LAB_DATA ?? (() => { throw new Error('评测：DSH_LAB_DATA 没设') })()) + '/drafts'
+        sandbox: false

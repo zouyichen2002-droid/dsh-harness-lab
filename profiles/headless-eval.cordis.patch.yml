@@ -1,0 +1,140 @@
+# dsh-harness-lab · headless 配置档的评测补丁（模板）
+# 不要直接拷：用 tools/install_profile.py 填好占位符再装进 $DSH_HOME/profiles/<配置档>/cordis.patch.yml
+#   {{LAB}}         本仓库的绝对路径（正斜杠）
+#   {{BASE_URL}}    本地模型服务（OpenAI 兼容），比如 http://127.0.0.1:8081/v1
+#   {{MODEL}}       模型 id（服务端的 alias）
+#   {{CONTEXT}}     上下文窗口
+#   {{KEY_ENV}}     模型服务密钥的环境变量名（评测框架从 DSH_LAB_KEY_FILE 读进这个变量）
+#   {{SKILL_DIRS}}  技能目录（YAML 列表，可以是 []）
+#
+# 做了什么：
+#   1. 模型换成本地服务
+#   2. 插一个精简预设「评测」并设为默认（和我们网页版用的「SV 创作」同一套内置工具）
+#   3. 停掉 headless 模板在顶层多挂的 10 个工具（goal、计划模式、子 Agent、workflow）—— 不停的话 Agent 拿到的比网页版多
+#   4. 执行器换成本仓库的 eval-runner（一个进程里多轮、等后台任务、挂预设）
+
+- id: llm-pi-ai
+  config:
+    providers:
+      local-llama:
+        apiKeyEnv: {{KEY_ENV}}
+        api: openai-completions
+        baseURL: {{BASE_URL}}
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        models:
+          - id: {{MODEL}}
+            input: [ text ]
+            contextWindow: {{CONTEXT}}
+            maxTokens: 4096
+
+- id: agent-default-model
+  config:
+    provider: local-llama
+    model: {{MODEL}}
+
+- insert:
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: lab
+    - id: preset-lab
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lab
+        name: 评测
+        description: 本地模型用的精简预设（文件、PowerShell / Bash、后台任务、技能、提问、交付）
+        order: 0
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: Your working directory is {{cwd}}.
+              prefix: You are a coding agent powered by the {{model}} model.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs: {{SKILL_DIRS}}
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  modelPolicies:
+                    - provider: local-llama
+                      model: {{MODEL}}
+                      headroomTokens: 1024     # 触发线 = floor(min(W×0.8, W−4096−1024))；原装的 65536 在小窗口下是负数、从不触发
+                      maxTokens: 1024
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 4096
+                  headChars: 2048
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+            config:
+              timeout: 15            # 没人答：15 秒后返回 pending，评测脚本下一句再回（原装 120 秒）
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+
+- id: tool-goal
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-workflow
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: dsh-lab-eval-runner
+      name: {{LAB}}/eval-runner/index.js
+      inject: [ headlessStartup ]
+      config:
+        script: !!js ctx.headlessStartup.task
